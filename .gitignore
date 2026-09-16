@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Environment variables - contains secrets, never commit
+.env
+.env.local
+.env.*.local
+
+# Local upload storage (not used by this project, kept as a safeguard)
+uploads/
+public/uploads/
+
+# SQLite user database (runtime state — created locally, never committed)
+data/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+coverage/
+dist/
+build/

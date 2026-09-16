@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Intelligent Image Upload System - a college project portal for securely uploading project documentation images to the cloud."
+  />
+  <title>Intelligent Image Upload System | College Project Portal</title>
+  <link rel="preconnect" href="https://res.cloudinary.com" crossorigin />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="header-top">
+        <div class="brand">
+          <span class="brand-badge" aria-hidden="true">&#128247;</span>
+          <h1>Intelligent Image Upload System</h1>
+        </div>
+        <p class="tagline">College Project Portal</p>
+      </div>
+      <p class="description">
+        Securely upload project documentation images to cloud storage using
+        Node.js, Express, Multer and Cloudinary. Images are validated, processed
+        in memory, and served back as secure cloud URLs.
+      </p>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="systemStatus" class="status-banner hidden"></div>
+
+    <div class="upload-grid">
+      <!-- Single image upload -->
+      <section class="card" aria-labelledby="single-title">
+        <h2 id="single-title">Single Image Upload</h2>
+        <p class="card-subtitle">Upload one image for your project documentation.</p>
+
+        <div
+          class="drop-zone"
+          id="singleDropZone"
+          tabindex="0"
+          role="button"
+          aria-label="Choose or drop a single image"
+        >
+          <input
+            type="file"
+            id="singleFileInput"
+            accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+            hidden
+          />
+          <div class="drop-zone-content">
+            <span class="drop-icon" aria-hidden="true">&#128228;</span>
+            <p><strong>Drag &amp; drop an image here</strong></p>
+            <p>or click to browse</p>
+          </div>
+          <p class="file-selection" id="singleFileName">No file selected</p>
+        </div>
+
+        <p class="file-info">
+          Supported: JPG, PNG, WEBP, GIF &nbsp;&middot;&nbsp; Max size: 5 MB
+        </p>
+
+        <button type="button" class="btn btn-primary" id="singleUploadBtn" disabled>
+          Upload Image
+        </button>
+
+        <div id="singleFeedback" class="feedback" role="status" aria-live="polite"></div>
+      </section>
+
+      <!-- Bulk image upload -->
+      <section class="card" aria-labelledby="bulk-title">
+        <h2 id="bulk-title">Bulk Image Upload</h2>
+        <p class="card-subtitle">Upload up to 20 images at once.</p>
+
+        <div
+          class="drop-zone"
+          id="bulkDropZone"
+          tabindex="0"
+          role="button"
+          aria-label="Choose or drop multiple images"
+        >
+          <input
+            type="file"
+            id="bulkFileInput"
+            accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+            multiple
+            hidden
+          />
+          <div class="drop-zone-content">
+            <span class="drop-icon" aria-hidden="true">&#128444;</span>
+            <p><strong>Drag &amp; drop images here</strong></p>
+            <p>or click to browse</p>
+          </div>
+          <p class="file-selection" id="bulkFileName">No files selected</p>
+        </div>
+
+        <p class="file-info">
+          Supported: JPG, PNG, WEBP, GIF &nbsp;&middot;&nbsp; Max size: 5 MB each
+          &nbsp;&middot;&nbsp; Max files: 20
+        </p>
+
+        <button type="button" class="btn btn-primary" id="bulkUploadBtn" disabled>
+          Upload Images
+        </button>
+
+        <div id="bulkFeedback" class="feedback" role="status" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <!-- Gallery -->
+    <section class="gallery-section" aria-labelledby="gallery-title">
+      <div class="gallery-heading">
+        <h2 id="gallery-title">Uploaded Project Images</h2>
+        <span id="galleryCount" class="gallery-count">0 images</span>
+      </div>
+
+      <div id="emptyState" class="empty-state">
+        <span class="empty-icon" aria-hidden="true">&#128247;</span>
+        <p>No images uploaded yet.</p>
+        <p class="empty-sub">Upload an image above to see it appear here.</p>
+      </div>
+
+      <div id="gallery" class="gallery" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>
+        Intelligent Image Upload System &mdash; Built with Node.js, Express,
+        Multer and Cloudinary.
+      </p>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
