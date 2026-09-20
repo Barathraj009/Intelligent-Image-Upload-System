@@ -23,6 +23,7 @@ const MAX_FILES = 20;
 const API = {
   single: "/api/upload/single",
   multiple: "/api/upload/multiple",
+  images: "/api/images",
   health: "/api/health",
 };
 
@@ -418,9 +419,26 @@ function createImageCard(image) {
   link.rel = "noopener noreferrer";
   link.textContent = image.url;
 
+  const actions = document.createElement("div");
+  actions.className = "gallery-actions";
+
+  if (image.id != null) {
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "gallery-delete";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.setAttribute(
+      "aria-label",
+      "Delete image " + (image.originalName || "")
+    );
+    deleteBtn.addEventListener("click", () => handleDeleteImage(image.id, card));
+    actions.appendChild(deleteBtn);
+  }
+
   body.appendChild(name);
   if (metaValues.length) body.appendChild(meta);
   body.appendChild(link);
+  body.appendChild(actions);
 
   card.appendChild(img);
   card.appendChild(body);
@@ -428,18 +446,72 @@ function createImageCard(image) {
   return card;
 }
 
+function updateGalleryState() {
+  const count = dom.gallery.children.length;
+  dom.galleryCount.textContent = count === 1 ? "1 image" : count + " images";
+  if (dom.emptyState) {
+    dom.emptyState.style.display = count === 0 ? "" : "none";
+  }
+}
+
 function addImageToGallery(image) {
   if (!image || !image.url) return;
 
-  if (dom.emptyState) {
-    dom.emptyState.style.display = "none";
-  }
-
   const card = createImageCard(image);
   dom.gallery.appendChild(card);
+  updateGalleryState();
+}
 
-  const count = dom.gallery.children.length;
-  dom.galleryCount.textContent = count === 1 ? "1 image" : count + " images";
+async function handleDeleteImage(id, card) {
+  if (!window.confirm("Delete this image from the gallery?")) return;
+
+  try {
+    const response = await fetchWithTimeout(API.images + "/" + id, {
+      method: "DELETE",
+    });
+    const data = await parseResponse(response);
+
+    if (response.ok && data.success) {
+      card.remove();
+      updateGalleryState();
+      showStatus("success", "Image deleted successfully.");
+      setTimeout(hideStatus, 2500);
+    } else {
+      showStatus("error", data.message || "Could not delete the image.");
+      setTimeout(hideStatus, 4000);
+    }
+  } catch (error) {
+    showStatus(
+      "error",
+      "Network error. Could not delete the image. Please try again."
+    );
+    setTimeout(hideStatus, 4000);
+  }
+}
+
+/* ------------------------------------------------------------------
+   Persistent gallery loading
+------------------------------------------------------------------ */
+
+async function loadImages() {
+  try {
+    const response = await fetchWithTimeout(API.images, { method: "GET" });
+    const data = await parseResponse(response);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        window.location.replace("/");
+        return;
+      }
+      return;
+    }
+
+    if (data.success) {
+      (data.images || []).forEach(addImageToGallery);
+    }
+  } catch (error) {
+    // Non-fatal: the gallery still fills with images uploaded this session.
+  }
 }
 
 /* ------------------------------------------------------------------
@@ -527,6 +599,7 @@ async function requireSession() {
 
 function init() {
   requireSession();
+  loadImages();
 
   setupDropZone(dom.single.dropZone, dom.single.input, (files) => {
     handleSingleSelect(files[0]);

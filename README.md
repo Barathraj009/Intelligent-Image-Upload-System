@@ -65,12 +65,15 @@ The result: a secure, centralized, validated image pipeline suitable for documen
 - **Single image upload** — upload one image via file picker or drag & drop.
 - **Bulk image upload** — upload up to 20 images in a single request.
 - **Drag & drop support** — with visual feedback and keyboard accessibility.
-- **Server-side validation** — MIME type, file extension, and 5 MB size limit.
+- **Server-side validation** — MIME type, file extension, 5 MB size limit, and authoritative content checks (magic bytes + 8000 px dimension cap) against renamed or malformed files.
 - **Memory-only storage** — Multer `memoryStorage()`; no permanent local files.
 - **Cloudinary integration** — streaming uploads from buffers, secure URLs returned.
+- **Persistent gallery** — every successful upload is recorded in SQLite, so the gallery lists *all* of a user's images across sessions, not just the current one.
+- **Image deletion & management** — delete an image from the gallery (removes both the local record and the Cloudinary asset).
+- **Upload rate limiting** — per-IP request limits plus a global in-flight cap so a burst can't exhaust server memory or Cloudinary quota.
 - **Dynamic gallery** — images render instantly without a page reload.
 - **Gmail OTP authentication** — sign in with a one-time email code (reusable auth module), with an `httpOnly` session cookie and a SQLite user store.
-- **Protective session gate** — unauthenticated uploads are rejected with `401`.
+- **Protective session gate** — unauthenticated uploads, listing, and deletion are rejected with `401`.
 - **Responsive design** — works on desktop, tablet, and mobile.
 - **Comprehensive error handling** — no stack traces or secrets leaked.
 - **Security first** — credentials via environment variables, `.env` git-ignored.
@@ -119,15 +122,19 @@ Dynamic image gallery
 
 Because Multer uses `memoryStorage()`, each uploaded image lives in a short-lived in-memory buffer that is streamed straight to Cloudinary. The local server never writes an upload to disk.
 
+Image *metadata* (Cloudinary URL, public id, dimensions, uploader, timestamp) is the exception: it is written to a local SQLite database — the same `data/app.db` used for user accounts — so the gallery can be re-hydrated after a restart. The images themselves always live in Cloudinary.
+
 ## How It Works
 
 1. **Select** — a student picks one or more images using the file picker or drag & drop.
 2. **Client-side validation** — the browser instantly rejects unsupported formats and oversized files, and enforces the 20-image bulk limit before anything is sent.
 3. **Upload request** — a `multipart/form-data` request is sent to the Express API (`POST /api/upload/single` or `POST /api/upload/multiple`).
 4. **Multer interception** — Multer's `memoryStorage()` keeps the files in RAM while its file filter re-validates MIME types, extensions, and the 5 MB / 20-file limits on the server.
-5. **Cloudinary upload** — each buffer is streamed to Cloudinary via `upload_stream()` into the `college-project-images` folder.
-6. **Secure response** — the API returns Cloudinary's `secure_url` (plus metadata) as JSON.
-7. **Dynamic gallery** — the frontend builds image cards from the response and appends them to the gallery without reloading the page.
+5. **Content validation** — the controller inspects each file's actual magic bytes with `image-size` (renamed non-images are rejected) and enforces the 8000 px dimension cap.
+6. **Cloudinary upload** — each buffer is streamed to Cloudinary via `upload_stream()` into the `college-project-images` folder.
+7. **Persistent record** — every successful upload is recorded in the SQLite image store (`data/app.db`), keyed by the authenticated email.
+8. **Secure response** — the API returns Cloudinary's `secure_url` (plus metadata and the record id) as JSON.
+9. **Dynamic gallery** — the frontend builds image cards from the response and appends them to the gallery without reloading the page. On page load the gallery is re-populated from `GET /api/images`, and each card has a delete action.
 
 ## Project Structure
 
@@ -145,14 +152,17 @@ intelligent-image-upload/
 │   └── cloudinary.js             # Cloudinary SDK configuration + health checks
 │
 ├── controllers/
-│   └── uploadController.js       # Single & bulk upload business logic
+│   ├── uploadController.js       # Single & bulk upload business logic
+│   └── imageController.js        # Persistent gallery: list & delete (+ Cloudinary cleanup)
 │
 ├── db/
-│   └── userStore.js              # SQLite-backed findOrCreateUser for auth module
+│   ├── userStore.js              # SQLite-backed findOrCreateUser for auth module
+│   └── imageStore.js             # SQLite-backed image metadata store (persistent gallery)
 │
 ├── middleware/
 │   ├── uploadMiddleware.js       # Multer setup (memoryStorage, limits, fileFilter)
-│   ├── uploadValidation.js       # Allowed types/extensions/size/count rules
+│   ├── uploadValidation.js       # Allowed types/extensions/size/count + content rules
+│   ├── uploadLimit.js            # Per-IP upload limiter + global in-flight cap
 │   └── errorHandler.js           # Centralized error handler
 │
 ├── modules/
@@ -167,7 +177,8 @@ intelligent-image-upload/
 │       └── utils/                # otpGenerator (CSPRNG+hashing), asyncHandler, logger
 │
 ├── routes/
-│   └── uploadRoutes.js           # /api/upload/* route definitions
+│   ├── uploadRoutes.js           # /api/upload/* route definitions
+│   └── imageRoutes.js            # /api/images/* route definitions (list + delete)
 │
 ├── utils/
 │   └── cloudinaryUpload.js       # Buffer-to-Cloudinary streaming helper
@@ -240,6 +251,7 @@ COOKIE_SAMESITE=lax
 
 - **`EMAIL_TRANSPORT=json`** renders verification emails into memory instead of sending them — ideal for local development. Switch to `gmail` and add a real `GMAIL_USER` + `GMAIL_APP_PASSWORD` (a Google **App Password**, not your login password — see <https://myaccount.google.com/apppasswords>) to send real codes.
 - **`OTP_HASH_SECRET`** and **`JWT_SECRET`** are dev placeholders. Generate strong random values (`openssl rand -hex 32`) and use **different** strings for each.
+- **`TRUST_PROXY`** *(optional)* — set `true` (or a proxy subnet) when running behind a reverse proxy (Render, Railway, nginx, Cloudflare) so per-IP rate limiting and `x-forwarded-for` behave correctly.
 
 ## Running the Project
 
@@ -320,6 +332,45 @@ Uploads up to 20 images in a single request. Each file is uploaded independently
 
 Reports server status and Cloudinary configuration state.
 
+### `GET /api/images`
+
+Lists every image the authenticated user has uploaded, newest first. The list is persistent (SQLite-backed), so it survives server restarts and browser sessions.
+
+**Success response (200):**
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "images": [
+    {
+      "id": 7,
+      "publicId": "college-project-images/abc123",
+      "url": "https://res.cloudinary.com/...",
+      "originalName": "architecture.png",
+      "format": "png",
+      "width": 1200,
+      "height": 800,
+      "bytes": 245000,
+      "createdAt": "2026-09-18T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+Requires a session: unauthenticated requests get `401`.
+
+### `DELETE /api/images/:id`
+
+Deletes one of the authenticated user's images — both the SQLite record and the Cloudinary asset. Ownership is always scoped to the requesting user.
+
+| Status | Meaning                                   |
+| ------ | ----------------------------------------- |
+| 200    | Image deleted                             |
+| 400    | Invalid image id                          |
+| 404    | No image with that id owned by this user  |
+| 502    | Cloudinary removal failed (record kept)   |
+
 ### Authentication API (`/api/auth/*`)
 
 Provided by the reusable Gmail OTP auth module. All responses are JSON `{ success: boolean, ... }`.
@@ -352,6 +403,7 @@ On successful verification the module hands off to this host's SQLite user store
 | Allowed formats         | JPG, JPEG, PNG, WEBP, GIF          |
 | Maximum file size       | 5 MB per image                     |
 | Maximum bulk count      | 20 images per request              |
+| Maximum dimension       | 8000 x 8000 pixels (content check) |
 
 Unsupported files (PDF, DOC, DOCX, ZIP, EXE, MP3, MP4, arbitrary binaries) are rejected by both frontend and backend validation.
 
@@ -359,8 +411,9 @@ Unsupported files (PDF, DOC, DOCX, ZIP, EXE, MP3, MP4, arbitrary binaries) are r
 
 - **Credentials live only in the environment** — loaded via `dotenv`, never hard-coded, never sent to the frontend, never committed.
 - **`.env` is git-ignored** — `.gitignore` prevents accidental commits.
-- **Backend validation is authoritative** — MIME type and extension checks, size limits, and file-count limits run on the server regardless of client-side checks.
-- **No permanent local storage** — uploaded images are processed in memory only. (User accounts are the exception: they're stored in a local SQLite file, `data/app.db`, which is git-ignored.)
+- **Backend validation is authoritative** — MIME type and extension checks, size limits, and file-count limits run on the server regardless of client-side checks. **Content validation** additionally inspects each file's real magic bytes (`image-size`) and rejects padded/renamed non-images and decompression bombs over 8000 px.
+- **Upload abuse protection** — uploads are limited per IP (60 requests / 15 min) and globally (8 concurrent in-flight uploads), returning `429`/`503` instead of exhausting RAM or Cloudinary quota.
+- **No permanent local storage** — uploaded images are processed in memory only. (User accounts and image metadata are the exception: they're stored in a local SQLite file, `data/app.db`, which is git-ignored.)
 - **Gmail OTP authentication** — the upload API is protected by `requireSession`; unauthenticated requests get `401`. OTPs are generated from a CSPRNG, stored only as HMAC hashes, verified in constant time, deleted after first use (no replay), rate-limited per email and per IP, and never logged. Sessions are short-lived JWTs (default 15 m) delivered as `httpOnly` cookies.
 - **Safe error messages** — the API never returns stack traces or secrets.
 - **Safe DOM rendering** — the gallery is built with `createElement`/`textContent`, avoiding unsafe HTML injection.
@@ -412,6 +465,10 @@ The application was verified with the following checks:
 11. No local permanent storage of uploaded images.
 12. **Real Cloudinary uploads were verified end-to-end** — images were uploaded via the API, secure URLs returned and confirmed live over HTTPS, then removed from the account after testing.
 13. **Gmail OTP auth flow verified end-to-end** — send-otp → OTP captured from the offline transport → verify-otp → JWT + `httpOnly` cookie issued → `/session` confirms the email → first login creates the SQLite user, returning login updates it → unauthenticated uploads rejected with `401`, authenticated uploads pass the guard.
+14. **Persistent gallery verified** — after authenticated uploads, `GET /api/images` returns every recorded image with the correct shape and ordering; the gallery re-hydrates on page reload.
+15. **Image deletion verified** — an authenticated user's image is removed from the gallery and its Cloudinary asset; deletes are scoped per user, and deleting a non-owned/non-existent id returns `404`.
+16. **Content validation verified** — renamed non-image binaries and oversized-dimension images are rejected server-side (`400`), even when client-side validation is bypassed.
+17. **Rate limiting verified** — bursts beyond the per-IP limit receive `429`; unauthenticated access to `/api/images` receives `401`.
 
 ## Screenshots
 
@@ -419,19 +476,17 @@ The application was verified with the following checks:
 
 ## Limitations
 
-- **No persistent gallery** — uploaded images are stored in Cloudinary, but the on-page gallery only lists images uploaded during the current browser session. A database or a listing endpoint would be required for a permanent "all uploads" view.
 - **No moderation/review workflow** — uploads go straight to the cloud and are publicly accessible via their URLs.
 - **OTP state is in-memory** — verification codes and rate-limit windows live in the server's memory (module default). A restart clears pending codes; multi-instance deployments need Redis/DB storage (see the module's `PENDING_WORK.md`).
 - **Offline email by default** — `EMAIL_TRANSPORT=json` doesn't actually deliver email; switch to `gmail` with a real App Password for real codes.
 - **Dependency audit note** — `npm audit` reports advisories for the vendored `nodemailer@6.10.1` (mail-composition path). They are not reachable in the current configuration: the module only emails a validated, Gmail-only recipient and `EMAIL_TRANSPORT=json` never sends mail. Upgrade to `nodemailer@10` (breaking) when real Gmail SMTP is enabled.
 - **Localhost by default** — the project runs locally; deployment to a hosting platform is left to the user.
+- **Single-machine SQLite** — the persistent gallery store is a local SQLite file, so multiple server instances would need a shared store (PostgreSQL / Redis) to keep galleries in sync.
 
 ## Future Enhancements
 
 - **Role-based authorization** — instructor/admin roles beyond email verification.
 - **Student & project association** — link each image to a project record.
-- **Database integration** — persist upload metadata (PostgreSQL / MongoDB).
-- **Image deletion & management** — remove images from Cloudinary via the API.
 - **Search & filtering** — filter the gallery by project, date, or tag.
 - **Image optimization** — automatic resizing/compression transforms via Cloudinary.
 - **Upload progress bars** — per-file progress with `XMLHttpRequest` or resumable uploads.
