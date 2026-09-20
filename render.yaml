@@ -52,7 +52,11 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
-    disk:
-      name: sqlite-data
-      mountPath: /data
-      sizeGB: 1
+    # GO-LIVE: uncomment the disk block below AND upgrade the instance to a
+# paid plan (Render requires paid instances for persistent disks). The
+    # Free-plan pilot keeps SQLite on the ephemeral filesystem instead. Data
+    # resets on every restart, which is fine while validating the deploy.
+    # disk:
+    #   name: sqlite-data
+    #   mountPath: /data
+    #   sizeGB: 1
