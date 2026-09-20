@@ -15,7 +15,10 @@
 const path = require("path");
 const Database = require("better-sqlite3");
 
-const DATA_DIR = path.join(__dirname, "..", "data");
+// DATA_DIR is overridable so deployments can point SQLite at a persistent
+// volume (e.g. Render disk mounted at /data) and so tests can isolate the
+// database in a temp directory. Defaults to <repo>/data for local runs.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
 const DB_PATH = path.join(DATA_DIR, "app.db");
 
 // Ensure the data directory exists before opening the database file.

@@ -21,6 +21,7 @@ authModule.configure({
 });
 
 const app = express();
+app.disable("x-powered-by");
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
 
@@ -71,9 +72,28 @@ app.use(express.static(path.join(__dirname, "public"), { index: false }));
 
 app.get("/api/health", (_req, res) => {
   const missing = getMissingConfig();
-  res.status(200).json({
+
+  // Verify the database is actually reachable — platform health checks use
+  // this endpoint to decide whether to restart the service.
+  let db = "ok";
+  try {
+    userStore.db.prepare("SELECT 1").get();
+  } catch (_error) {
+    db = "error";
+  }
+
+  if (db !== "ok") {
+    return res.status(503).json({
+      success: false,
+      status: "degraded",
+      db,
+    });
+  }
+
+  return res.status(200).json({
     success: true,
     status: "ok",
+    db,
     cloudinaryConfigured: isConfigured,
     cloudinaryMissingConfig: missing,
     uptime: process.uptime(),
@@ -140,46 +160,82 @@ app.use("/api", (_req, res) => {
 app.use(errorHandler);
 
 // ---------------------------------------------------------------------------
-// Boot
+// Boot — runs only when `node app.js` is executed directly. When the module
+// is `require()`d (automated tests, CI), the app is exported without binding
+// a port so the caller can listen on its own ephemeral port.
 // ---------------------------------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(
-    `Intelligent Image Upload System running on http://localhost:${PORT}`
-  );
-
-  if (!isConfigured) {
-    console.warn(
-      "Warning: Cloudinary is not fully configured. Missing: " +
-        getMissingConfig().join(", ") +
-        ". See .env.example."
+if (require.main === module) {
+  const server = app.listen(PORT, () => {
+    console.log(
+      `Intelligent Image Upload System running on http://localhost:${PORT}`
     );
-  }
 
-  if (!process.env.NODE_ENV) {
-    console.warn(
-      "Warning: NODE_ENV is not set. " +
-        (isProd
-          ? ""
-          : "Set NODE_ENV=production for secure cookies + HTTPS enforcement when deploying.")
-    );
-  }
-
-  if (process.env.NODE_ENV === "production") {
-    const hmacDefault = "dev-only-otp-secret-change-me";
-    const jwtDefault = "dev-only-jwt-secret-change-me";
-    if (
-      process.env.OTP_HASH_SECRET === hmacDefault ||
-      process.env.JWT_SECRET === jwtDefault ||
-      process.env.OTP_HASH_SECRET?.startsWith("change-this") ||
-      process.env.JWT_SECRET?.startsWith("change-this")
-    ) {
+    if (!isConfigured) {
       console.warn(
-        "Warning: OTP_HASH_SECRET / JWT_SECRET appear to be placeholder " +
-          "values. Replace them with strong random strings for production."
+        "Warning: Cloudinary is not fully configured. Missing: " +
+          getMissingConfig().join(", ") +
+          ". See .env.example."
       );
     }
+
+    if (!process.env.NODE_ENV) {
+      console.warn(
+        "Warning: NODE_ENV is not set. " +
+          (isProd
+            ? ""
+            : "Set NODE_ENV=production for secure cookies + HTTPS enforcement when deploying.")
+      );
+    }
+
+    if (process.env.NODE_ENV === "production") {
+      const hmacDefault = "dev-only-otp-secret-change-me";
+      const jwtDefault = "dev-only-jwt-secret-change-me";
+      if (
+        process.env.OTP_HASH_SECRET === hmacDefault ||
+        process.env.JWT_SECRET === jwtDefault ||
+        process.env.OTP_HASH_SECRET?.startsWith("change-this") ||
+        process.env.JWT_SECRET?.startsWith("change-this")
+      ) {
+        console.warn(
+          "Warning: OTP_HASH_SECRET / JWT_SECRET appear to be placeholder " +
+            "values. Replace them with strong random strings for production."
+        );
+      }
+    }
+  });
+
+  // Graceful shutdown: platforms (Render, Railway, Fly, Docker, orchestrators)
+  // send SIGTERM/SIGINT before killing the process. Drain connections, close
+  // the SQLite stores, then exit — with a force-exit safety net so the
+  // platform never has to SIGKILL us after our grace period.
+  function shutdown(signal) {
+    console.log(`${signal} received, shutting down gracefully...`);
+
+    server.closeIdleConnections();
+
+    server.close(() => {
+      try {
+        require("./db/imageStore").db?.close();
+      } catch (_error) {
+        /* already closed */
+      }
+      try {
+        userStore.db?.close();
+      } catch (_error) {
+        /* already closed */
+      }
+      process.exit(0);
+    });
+
+    setTimeout(() => {
+      console.error("Graceful shutdown timed out, forcing exit.");
+      process.exit(1);
+    }, 10_000).unref();
   }
-});
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
 
 module.exports = app;

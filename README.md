@@ -26,6 +26,7 @@ A college project portal for uploading project documentation images securely to 
 - [Cloudinary Integration](#cloudinary-integration)
 - [Error Handling](#error-handling)
 - [Testing](#testing)
+- [Deployment](#deployment)
 - [Screenshots](#screenshots)
 - [Limitations](#limitations)
 - [Future Enhancements](#future-enhancements)
@@ -174,7 +175,10 @@ intelligent-image-upload/
 │       ├── middleware/           # requireSession, validateEmail, rateLimiter, errorHandler
 │       ├── routes/authRoutes.js  # /api/auth/* route definitions
 │       ├── services/             # otpService, otpStore, sessionService, emailService
-│       └── utils/                # otpGenerator (CSPRNG+hashing), asyncHandler, logger
+│       ├── utils/                # otpGenerator (CSPRNG+hashing), asyncHandler, logger
+│       ├── README.md             # Module docs (built for AirIndex, reused here)
+│       ├── INTEGRATION.md        # How to mount the module + user-store adapter
+│       └── PENDING_WORK.md       # Production-readiness checklist (Redis OTP store, etc.)
 │
 ├── routes/
 │   ├── uploadRoutes.js           # /api/upload/* route definitions
@@ -450,7 +454,18 @@ Images are organized under the `college-project-images` folder, and responses re
 
 ## Testing
 
-The application was verified with the following checks:
+Automated tests (no extra dependencies; Node's built-in runner):
+
+```bash
+npm test
+```
+
+Runs **39 tests**: the OTP module's own 31-test suite (vendored into
+`modules/otp-auth/test/`) plus host integration + boot/shutdown tests in
+`test/`. The host tests boot the real app against a throwaway SQLite DB and
+offline email transport, so no network or credentials are needed.
+
+The application was additionally verified with the following manual checks:
 
 1. Application starts without errors.
 2. Frontend loads correctly at `http://localhost:3000`.
@@ -470,6 +485,14 @@ The application was verified with the following checks:
 16. **Content validation verified** — renamed non-image binaries and oversized-dimension images are rejected server-side (`400`), even when client-side validation is bypassed.
 17. **Rate limiting verified** — bursts beyond the per-IP limit receive `429`; unauthenticated access to `/api/images` receives `401`.
 
+## Deployment
+
+This project is ready to deploy as a real service. `npm audit` is clean, the
+full test suite runs in CI, and the repo ships a `Dockerfile`, a `render.yaml`
+blueprint, and graceful shutdown. See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for
+the complete runbook — supported platforms, the persistent-disk requirement,
+the secrets you must set, and the scaling path.
+
 ## Screenshots
 
 > Screenshots to be added. The application shows a two-card upload panel (single + bulk), drag & drop zones, and a responsive CSS Grid gallery of uploaded images.
@@ -479,8 +502,6 @@ The application was verified with the following checks:
 - **No moderation/review workflow** — uploads go straight to the cloud and are publicly accessible via their URLs.
 - **OTP state is in-memory** — verification codes and rate-limit windows live in the server's memory (module default). A restart clears pending codes; multi-instance deployments need Redis/DB storage (see the module's `PENDING_WORK.md`).
 - **Offline email by default** — `EMAIL_TRANSPORT=json` doesn't actually deliver email; switch to `gmail` with a real App Password for real codes.
-- **Dependency audit note** — `npm audit` reports advisories for the vendored `nodemailer@6.10.1` (mail-composition path). They are not reachable in the current configuration: the module only emails a validated, Gmail-only recipient and `EMAIL_TRANSPORT=json` never sends mail. Upgrade to `nodemailer@10` (breaking) when real Gmail SMTP is enabled.
-- **Localhost by default** — the project runs locally; deployment to a hosting platform is left to the user.
 - **Single-machine SQLite** — the persistent gallery store is a local SQLite file, so multiple server instances would need a shared store (PostgreSQL / Redis) to keep galleries in sync.
 
 ## Future Enhancements

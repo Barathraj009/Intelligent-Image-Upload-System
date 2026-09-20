@@ -1,0 +1,58 @@
+# Render Blueprint — "Blueprints" tab → "New Blueprint Instance", or from the
+# repo root: render blueprint launch (see DEPLOYMENT.md).
+#
+# NOTE: the Persistent Disk requires a PAID instance on Render. On the Free
+# plan the filesystem is ephemeral — data/app.db would reset whenever the
+# service restarts or redeploys, so switch to at least a paid plan before
+# using this in production.
+
+services:
+  - type: web
+    name: intelligent-image-upload
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci
+    startCommand: node app.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      # SQLite must live on the persistent disk, never the ephemeral FS.
+      - key: DATA_DIR
+        value: /data
+      # Behind Render's reverse proxy, so per-IP rate limiting and
+      # x-forwarded-for behave correctly.
+      - key: TRUST_PROXY
+        value: "true"
+      - key: EMAIL_TRANSPORT
+        value: gmail
+      - key: GMAIL_ONLY
+        value: "true"
+      - key: OTP_RESEND_COOLDOWN_SECONDS
+        value: "45"
+      - key: OTP_MAX_REQUESTS_PER_WINDOW
+        value: "5"
+      - key: OTP_REQUEST_WINDOW_MINUTES
+        value: "15"
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      # ---- Secrets — `sync: false` means Render prompts for the value at
+      # first deploy and never stores it in the repository. ----
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: OTP_HASH_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+    disk:
+      name: sqlite-data
+      mountPath: /data
+      sizeGB: 1
