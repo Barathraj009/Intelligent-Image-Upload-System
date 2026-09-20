@@ -23,17 +23,11 @@ function serializeImage(row) {
 
 /**
  * GET /api/images
- * List the authenticated user's images, newest first. The gallery is
- * per-user private data, so responses are never cached. `?limit=` caps the
- * page size (default 200, server-enforced max 500).
+ * List every image the authenticated user has uploaded, newest first.
  */
 async function listImages(req, res, next) {
   try {
-    const limitRaw = Number.parseInt(String(req.query.limit ?? ""), 10);
-    const limit =
-      Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
-    const images = imageStore.listImages(req.auth.email, limit).map(serializeImage);
-    res.setHeader("Cache-Control", "no-store, max-age=0");
+    const images = imageStore.listImages(req.auth.email).map(serializeImage);
     return res.status(200).json({ success: true, count: images.length, images });
   } catch (error) {
     return next(error);

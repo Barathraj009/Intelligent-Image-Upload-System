@@ -5,7 +5,7 @@
  * dropping this module into a different project. Everything else in
  * frontend/ can be copied as-is.
  *
- * See ../../modules/otp-auth/INTEGRATION.md for the full integration guide.
+ * See ../../INTEGRATION.md for the full integration guide.
  */
 window.OtpAuthConfig = {
   // Base URL of the backend's auth routes. Point this at wherever

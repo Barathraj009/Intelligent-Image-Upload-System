@@ -18,9 +18,8 @@ const fs = require("fs");
 require("./userStore");
 
 // Reuse the same database file as the user store so there is a single
-// `data/app.db` (WAL mode already enabled by userStore.js). Keep DATA_DIR in
-// sync with userStore.js so both stores always open the same database file.
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
+// `data/app.db` (WAL mode already enabled by userStore.js).
+const DATA_DIR = path.join(__dirname, "..", "data");
 const DB_PATH = path.join(DATA_DIR, "app.db");
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -63,7 +62,7 @@ const insertImage = db.prepare(
 );
 
 const listImagesByEmail = db.prepare(
-  "SELECT * FROM images WHERE email = @email ORDER BY created_at DESC, id DESC LIMIT @limit"
+  "SELECT * FROM images WHERE email = ? ORDER BY created_at DESC, id DESC"
 );
 
 const findImageById = db.prepare("SELECT * FROM images WHERE id = ? AND email = ?");
@@ -102,15 +101,9 @@ function createImageRecord(email, meta) {
   };
 }
 
-/** List images owned by `email`, newest first.
- * @param {number} [limit=200] - Cap on rows returned (server-enforced max 500).
- */
-function listImages(email, limit = 200) {
-  const capped = Math.min(Math.max(Number(limit) || 200, 1), 500);
-  return listImagesByEmail.all({
-    email: email.toLowerCase().trim(),
-    limit: capped,
-  });
+/** List all images owned by `email`, newest first. */
+function listImages(email) {
+  return listImagesByEmail.all(email.toLowerCase().trim());
 }
 
 /**
@@ -137,6 +130,5 @@ module.exports = {
   listImages,
   findImage,
   deleteImageRecord,
-  db,
   DB_PATH,
 };
