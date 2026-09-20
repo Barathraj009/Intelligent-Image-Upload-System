@@ -10,6 +10,10 @@
 //
 // The env overrides below MUST be set before app.js is required: dotenv only
 // fills in vars that are not already present.
+//
+// A dummy CLOUDINARY_URL keeps the app "configured" so content validation
+// runs before any upload would reach Cloudinary (tests never upload for real
+// and never call the Cloudinary API).
 
 const os = require("os");
 const path = require("path");
@@ -20,6 +24,7 @@ const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "iiu-host-test-"));
 process.env.NODE_ENV = "test";
 process.env.EMAIL_TRANSPORT = "json";
 process.env.DATA_DIR = TEMP_DIR;
+process.env.CLOUDINARY_URL = "cloudinary://dummy-key:dummy-secret@dummy-cloud";
 process.env.OTP_RESEND_COOLDOWN_SECONDS = "0";
 process.env.OTP_MAX_ATTEMPTS = "5";
 process.env.OTP_MAX_REQUESTS_PER_WINDOW = "100";
