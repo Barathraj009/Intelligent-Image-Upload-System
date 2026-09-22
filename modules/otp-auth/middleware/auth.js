@@ -38,6 +38,7 @@ function requireSession(req, res, next) {
   }
 
   req.auth = decoded;
+  req.authToken = token;
   next();
 }
 

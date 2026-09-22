@@ -26,13 +26,32 @@ if (process.env.CLOUDINARY_URL) {
 /**
  * Verify that all required Cloudinary configuration values are present.
  * Returns an array of the names of any missing settings.
+ *
+ * Placeholder values (e.g. the `your_api_key` sample from CLOUDINARY_URL or
+ * a literal "your_*" individual setting) are treated as missing so the
+ * health check doesn't report "configured" for a .env.example that was
+ * copied verbatim.
  */
 function getMissingConfig() {
+  if (
+    process.env.CLOUDINARY_URL &&
+    !process.env.CLOUDINARY_URL.startsWith("cloudinary://your_")
+  ) {
+    return [];
+  }
+
+  const isPlaceholder = (value) => !value || value.startsWith("your_");
+
   const missing = [];
-  if (process.env.CLOUDINARY_URL) return missing;
-  if (!process.env.CLOUDINARY_CLOUD_NAME) missing.push("CLOUDINARY_CLOUD_NAME");
-  if (!process.env.CLOUDINARY_API_KEY) missing.push("CLOUDINARY_API_KEY");
-  if (!process.env.CLOUDINARY_API_SECRET) missing.push("CLOUDINARY_API_SECRET");
+  if (isPlaceholder(process.env.CLOUDINARY_CLOUD_NAME)) {
+    missing.push("CLOUDINARY_CLOUD_NAME");
+  }
+  if (isPlaceholder(process.env.CLOUDINARY_API_KEY)) {
+    missing.push("CLOUDINARY_API_KEY");
+  }
+  if (isPlaceholder(process.env.CLOUDINARY_API_SECRET)) {
+    missing.push("CLOUDINARY_API_SECRET");
+  }
   return missing;
 }
 

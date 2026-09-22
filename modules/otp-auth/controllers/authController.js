@@ -1,6 +1,10 @@
 const config = require('../config/env');
 const otpService = require('../services/otpService');
-const { issueSessionToken, decodeSessionToken } = require('../services/sessionService');
+const {
+  issueSessionToken,
+  decodeSessionToken,
+  revokeSessionToken,
+} = require('../services/sessionService');
 const { getUserStore } = require('../services/userStore');
 const asyncHandler = require('../utils/asyncHandler');
 const logger = require('../utils/logger');
@@ -185,6 +189,26 @@ const verifyOtp = asyncHandler(async (req, res) => {
 });
 
 const logout = asyncHandler(async (req, res) => {
+  // Recover the presented token from cookie or Bearer header so we can
+  // revoke it. (The logout route is intentionally NOT behind requireSession,
+  // so req.authToken may not be set here.)
+  const token =
+    (config.cookie.useCookie && req.cookies && req.cookies[config.cookie.name]) ||
+    (req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer ')
+      ? req.headers.authorization.slice(7)
+      : null);
+
+  // Revoke the presented token so a credential that was exfiltrated or kept
+  // in a bearer header cannot be re-used even though it hasn't expired yet.
+  if (token) {
+    try {
+      revokeSessionToken(token);
+    } catch (_err) {
+      // Revocation is best-effort; cookie clearing still happens below.
+    }
+  }
+
   if (config.cookie.useCookie) {
     res.clearCookie(config.cookie.name, {
       httpOnly: true,
@@ -192,25 +216,45 @@ const logout = asyncHandler(async (req, res) => {
       sameSite: config.cookie.sameSite,
     });
   }
-  // Note: JWTs are stateless, so this clears the client-held credential
-  // but does not revoke a Bearer token a caller stored elsewhere. See
-  // PENDING_WORK.md → "Session revocation" for a production-grade approach
-  // (server-side denylist / short-lived refresh tokens).
+  // Note: stateless JWTs are cleared client-side and now denied server-side
+  // for the lifetime of the token via the in-memory jti denylist. See
+  // PENDING_WORK.md → "Session revocation" for a multi-instance approach.
   return res.status(200).json({ success: true, message: 'Logged out.' });
 });
 
 const session = asyncHandler(async (req, res) => {
   // Protected by middleware/auth.js#requireSession. req.auth is the
-  // verified JWT payload, which includes iat (issued-at) and exp (expiry)
-  // in Unix seconds.
+  // verified JWT payload, which includes iat (issued-at), exp (expiry) and
+  // jti (id) in Unix seconds.
   const iatMs = req.auth.iat ? req.auth.iat * 1000 : null;
   const expMs = req.auth.exp ? req.auth.exp * 1000 : null;
+
+  // Sliding session refresh: when the token is running low (less than half
+  // its lifetime left), rotate it and hand back a fresh one so active users
+  // aren't logged out mid-session. The old token is revoked.
+  let refreshed = false;
+  let refreshedExpiresAt = null;
+  if (req.auth.exp) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lifetimeSec = req.auth.exp - (req.auth.iat || nowSec);
+    const remainingSec = req.auth.exp - nowSec;
+    if (lifetimeSec > 0 && remainingSec < lifetimeSec / 2) {
+      const fresh = issueSessionToken(req.auth.email);
+      if (req.authToken) revokeSessionToken(req.authToken);
+      setSessionCookie(res, fresh.token);
+      refreshed = true;
+      refreshedExpiresAt = fresh.expiresAt;
+    }
+  }
+
   return res.status(200).json({
     success: true,
     email: req.auth.email,
     authMethod: req.auth.authMethod,
     verifiedAt: iatMs ? new Date(iatMs).toISOString() : null,
     expiresAt: expMs ? new Date(expMs).toISOString() : null,
+    refreshed,
+    refreshedExpiresAt: refreshedExpiresAt ? new Date(refreshedExpiresAt).toISOString() : null,
   });
 });
 

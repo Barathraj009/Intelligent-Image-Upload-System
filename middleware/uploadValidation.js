@@ -22,7 +22,7 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES_COUNT = 20;
 
 /** Largest allowed dimension (width or height) in pixels — prevents decompression/pixel bombs. */
-const MAX_IMAGE_DIMENSION = 8000;
+const MAX_IMAGE_DIMENSION = Number(process.env.MAX_IMAGE_DIMENSION) || 8000;
 
 /**
  * Extract a file extension from a filename.

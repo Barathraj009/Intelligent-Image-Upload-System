@@ -23,8 +23,9 @@ const MAX_FILES = 20;
 const API = {
   single: "/api/upload/single",
   multiple: "/api/upload/multiple",
-  images: "/api/images",
   health: "/api/health",
+  images: "/api/images",
+  logout: "/api/auth/logout",
 };
 
 /* ------------------------------------------------------------------
@@ -53,6 +54,7 @@ const dom = {
   gallery: document.getElementById("gallery"),
   emptyState: document.getElementById("emptyState"),
   galleryCount: document.getElementById("galleryCount"),
+  logoutBtn: document.getElementById("logoutBtn"),
 
   lightbox: document.getElementById("lightbox"),
 };
@@ -597,9 +599,22 @@ async function requireSession() {
   window.location.replace("/");
 }
 
+async function logout() {
+  try {
+    await fetchWithTimeout(API.logout, { method: "POST" });
+  } catch (error) {
+    // Ignore network errors during logout; proceed to the login page anyway.
+  }
+  window.location.replace("/");
+}
+
 function init() {
   requireSession();
   loadImages();
+
+  if (dom.logoutBtn) {
+    dom.logoutBtn.addEventListener("click", logout);
+  }
 
   setupDropZone(dom.single.dropZone, dom.single.input, (files) => {
     handleSingleSelect(files[0]);

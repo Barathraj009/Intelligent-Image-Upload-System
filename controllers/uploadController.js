@@ -30,12 +30,12 @@ function buildImageMeta(result, originalName) {
  * frontend for immediate deletion without a refetch). A store failure must
  * not discard the user's successful Cloudinary upload.
  */
-function recordImageAndEnrich(meta, req) {
+function recordImageAndEnrich(meta, email) {
   try {
-    const record = imageStore.createImageRecord(req.auth.email, meta);
+    const record = imageStore.createImageRecord(email, meta);
     return { ...meta, id: record.id };
   } catch (error) {
-    console.warn("Failed to record image in gallery store:", error);
+    console.warn("Failed to record image in gallery store:", error.message);
     return meta;
   }
 }
@@ -74,10 +74,15 @@ async function uploadSingle(req, res, next) {
 
     const result = await uploadBufferToCloudinary(file, cloudinary);
 
+    const image = recordImageAndEnrich(
+      buildImageMeta(result, file.originalname),
+      req.auth.email
+    );
+
     return res.status(200).json({
       success: true,
       message: "Image uploaded successfully.",
-      image: recordImageAndEnrich(buildImageMeta(result, file.originalname), req),
+      image,
     });
   } catch (error) {
     next(error);
@@ -135,7 +140,10 @@ async function uploadMultiple(req, res, next) {
       try {
         const result = await uploadBufferToCloudinary(file, cloudinary);
         uploadedImages.push(
-          recordImageAndEnrich(buildImageMeta(result, file.originalname), req)
+          recordImageAndEnrich(
+            buildImageMeta(result, file.originalname),
+            req.auth.email
+          )
         );
       } catch (error) {
         failedUploads.push({

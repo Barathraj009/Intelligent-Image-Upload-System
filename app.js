@@ -10,9 +10,11 @@ const uploadRoutes = require("./routes/uploadRoutes");
 const imageRoutes = require("./routes/imageRoutes");
 const errorHandler = require("./middleware/errorHandler");
 const { isConfigured, getMissingConfig } = require("./config/cloudinary");
+const { uploadLimiter, inFlightCap } = require("./middleware/uploadLimit");
 
 const authModule = require("./modules/otp-auth");
 const userStore = require("./db/userStore");
+const { verifySessionToken } = require("./modules/otp-auth/services/sessionService");
 
 authModule.configure({
   userStore: {
@@ -82,14 +84,10 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authModule.routes);
 
-// Upload API — protected + rate-limited
-app.use(
-  "/api/upload",
-  authModule.requireSession,
-  require("./middleware/uploadLimit").uploadLimiter,
-  require("./middleware/uploadLimit").inFlightCap(),
-  uploadRoutes
-);
+// Upload API — protected + rate-limited. Each batch request can hold up to
+// 20 images (100 MB) in memory, so a per-IP limit + global in-flight cap
+// bound how much RAM/Cloudinary quota a client can consume at once.
+app.use("/api/upload", authModule.requireSession, uploadLimiter, inFlightCap(), uploadRoutes);
 
 // Image list & delete — protected
 app.use(
@@ -106,27 +104,20 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "auth", "index.html"));
 });
 
-app.get("/app", (req, res, next) => {
+app.get("/app", (req, res) => {
   // Server-side gate: reject unauthenticated visitors before serving the
-  // portal HTML.  We replicate the cookie check here so the user is
-  // redirected to the login page without a flash of protected content.
+  // portal HTML.  Reuses the auth module's own verifier (which also checks
+  // the revocation denylist) so behavior matches /api/upload exactly.
   const cookieName = authModule.config.cookie.name;
   const token =
     (req.cookies && req.cookies[cookieName]) ||
     (req.headers.authorization &&
-      req.headers.authorization.startsWith("Bearer ")
-        ? req.headers.authorization.slice(7)
-        : null);
+    req.headers.authorization.startsWith("Bearer ")
+      ? req.headers.authorization.slice(7)
+      : null);
 
-  if (!token) return res.redirect("/");
-
-  const jwt = require("jsonwebtoken");
-  try {
-    jwt.verify(token, authModule.config.jwt.secret);
-    return res.sendFile(path.join(__dirname, "public", "index.html"));
-  } catch (_e) {
-    return res.redirect("/");
-  }
+  if (!token || !verifySessionToken(token)) return res.redirect("/");
+  return res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 // 404 for unknown /api/* routes
